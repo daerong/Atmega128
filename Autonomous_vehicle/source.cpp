@@ -6,6 +6,7 @@
 #define D_A 6
 #define D_B 11
 #define D_C 30		// 신뢰할 수 있는 최대치
+#define D_D 70
 #define DELTA 1
 #define MOTOR_FAST 235
 #define MOTOR_SLOW 210
@@ -20,6 +21,7 @@ unsigned long int TCsec;
 unsigned long int TCstart;
 
 unsigned char mode;
+unsigned char nowStat;
 
 /* 서보 */
 void Init_Timer3A()
@@ -265,54 +267,12 @@ void get_sonar() {
 		LCD_CHAR('Z');
 		break;
 	}
+	LCD_pos(0, 15);
+	LCD_CHAR(nowStat);
 
 	LCD_pos(1, 0);
 	sprintf(TCsecStr, "%4x%4x", TCsec >> 16, TCsec);
 	LCD_STR(TCsecStr);
-}
-
-void normal_mode() {
-	switch (L_R) {
-	case 0:
-		if (rightD > D_C && rightPastD > D_C && frontD < D_C && frontPastD < D_C) { mode = 1; DC_front(); Motor_fast(); Servo_motor(0); delay_ms(100); }
-		else if (leftD < D_A) { DC_back(); Motor_fast(); Servo_motor(-45); delay_ms(200); Servo_motor(0); delay_ms(200); }
-		else if (leftD < D_B) { DC_front(); Motor_fast(); Servo_motor(5 * (D_B - leftD)); }
-		break;
-
-	case 1:
-		if (leftD > D_C && leftPastD > D_C && frontD < D_C && frontPastD < D_C) { mode = 1; DC_front(); Motor_fast(); Servo_motor(0); delay_ms(100); }
-		else if (rightD < D_A) { DC_back(); Motor_fast(); Servo_motor(45); delay_ms(200); Servo_motor(0); delay_ms(200); }
-		else if (rightD < D_B) { DC_front(); Motor_fast(); Servo_motor(-5 * (D_B - rightD)); }
-		break;
-
-	default:
-		DC_front(); Motor_slow(); Servo_motor(0);
-	}
-}
-
-void turn_mode() {
-	switch (L_R) {
-	case 0:
-		DC_Right(); Motor_fast(); Servo_motor(45);
-		break;
-	case 1:
-		DC_Left(); Motor_fast(); Servo_motor(-45);
-		break;
-	default:
-		DC_back(); Motor_slow(); Servo_motor(0);
-	}
-	//switch (L_R) {
-	//case 0:
-	//	if (frontD < frontPastD) { mode = 0; }
-	//	else { DC_Right(); Motor_fast(); Servo_motor(45); }
-	//	break;
-	//case 1:
-	//	if (frontD < frontPastD) { mode = 0; }
-	//	else { DC_Left(); Motor_fast(); Servo_motor(-45); }
-	//	break;
-	//default:
-	//	DC_back(); Motor_slow(); Servo_motor(0);
-	//}
 }
 
 void main() {
@@ -351,6 +311,7 @@ void main() {
 
 	L_R = 2;    //작은 값 L(0), R(1)
 	mode = 0;
+	nowStat = 0;
 
 	while (1) {
 		L_R = 0;
@@ -364,45 +325,113 @@ void main() {
 		if (!mode) TCstart = 0;
 		else if (TCstart == 0) TCstart = TCsec;
 
-		if (leftD > leftPastD - DELTA && leftD < leftPastD + DELTA && frontD > frontPastD - DELTA && frontD < frontPastD + DELTA && rightD > rightPastD - DELTA && rightD < rightPastD + DELTA) {
-			switch (mode) {
-			case 0:
-				DC_back();
-				Motor_slow();
+		if (TCsec > 650000) mode = 2;
 
-				if (leftPastD > rightPastD) {
-					Servo_motor(30);
-					delay_ms(400);
-					Servo_motor(-20);
-				}
-				else {
-					Servo_motor(-30);
-					delay_ms(400);
-					Servo_motor(20);
-				}
-				delay_ms(500);
+		if (mode == 2) {
+			nowStat = '2';
+			DC_front();
+			Servo_motor(25);
+			delay_ms(200);
+			Servo_motor(-25);
+			delay_ms(200);
+			Servo_motor(25);
+			delay_ms(200);
+			Servo_motor(-25);
+			delay_ms(200);
+			Servo_motor(25);
+			delay_ms(200);
+			Servo_motor(-25);
+			delay_ms(200);
+			DC_stop();
+			LCD_Clear();
+			sprintf(TCsecStr, "End Drive");
+			LCD_STR(TCsecStr);
+			delay_ms(50000);
+		}
+		else if (frontD < D_A && frontPastD < D_B) {
+			nowStat = 'B';
+			DC_back();
+			Motor_slow();
+
+			if (leftPastD > rightPastD) {
+				Servo_motor(20);
+				delay_ms(400);
+				Servo_motor(0);
+			}
+			else {
+				Servo_motor(-20);
+				delay_ms(400);
+				Servo_motor(0);
+			}
+			delay_ms(300);
+			mode = 1;
+		}
+		else if (leftD > leftPastD - DELTA && leftD < leftPastD + DELTA && frontD > frontPastD - DELTA && frontD < frontPastD + DELTA && rightD > rightPastD - DELTA && rightD < rightPastD + DELTA) {
+			nowStat = 'S';
+			DC_back();
+			Motor_slow();
+
+			if (leftPastD > rightPastD) {
+				Servo_motor(30);
+				delay_ms(400);
+				Servo_motor(-20);
+			}
+			else {
+				Servo_motor(-30);
+				delay_ms(400);
+				Servo_motor(20);
+			}
+			delay_ms(500);
+		}
+		else if (mode) {
+			DC_front(); Motor_fast();
+			switch (L_R) {
+			case 0:
+				nowStat = 'R';
+				DC_front(); Motor_fast();
+				if (rightD > D_D) { Servo_motor(45); }
+				else if (rightD > D_C) { Servo_motor(35); }
+				else { Servo_motor(15); }
+				delay_ms(400);
 				break;
 			case 1:
-				if ((TCsec - TCstart) / 30000) { mode = 0; DC_front(); Motor_fast(); Servo_motor(0); delay_ms(100); }
+				nowStat = 'L';
+				DC_front(); Motor_fast();
+				if (leftD > D_D) { Servo_motor(-45); }
+				else if (leftD > D_C) { Servo_motor(-35); }
+				else { Servo_motor(-15); }
+				delay_ms(400);
 				break;
-			case 2:
-				break;
+
 			default:
+				DC_front(); Motor_slow(); Servo_motor(0);
 			}
+			mode = 0;
+			delay_ms(1000);
+		}
+		else if (leftD >= D_B && rightD >= D_B) {
+			nowStat = 'F';
+			Servo_motor(0); delay_ms(100); DC_front(); Motor_fast();
 		}
 		else {
-			switch (mode) {
+			switch (L_R) {
 			case 0:
-				normal_mode();
+				nowStat = 'l';
+				if (leftD < D_A) { mode = 1; DC_back(); Motor_fast(); Servo_motor(-45); delay_ms(400); Servo_motor(0); delay_ms(300); }
+				else if (leftD < D_B) { DC_front(); Motor_fast(); Servo_motor(5 * (D_B - leftD)); }
 				break;
+
 			case 1:
-				turn_mode();
+				nowStat = 'r';
+				if (rightD < D_A) { mode = 1; DC_back(); Motor_fast(); Servo_motor(45); delay_ms(400); Servo_motor(0); delay_ms(300); }
+				else if (rightD < D_B) { DC_front(); Motor_fast(); Servo_motor(-5 * (D_B - rightD)); }
 				break;
-			case 2:
-				break;
+
 			default:
+				DC_front(); Motor_slow(); Servo_motor(0);
 			}
+
+			delay_ms(100);
 		}
-		delay_ms(100);
 	}
 }
