@@ -3,20 +3,23 @@
 #include <delay.h>
 #include "lcd.h"
 
-#define SONAR_ARR_SIZE 3
+#define D_A 6
+#define D_B 11
+#define D_C 30		// 신뢰할 수 있는 최대치
+#define DELTA 1
+#define MOTOR_FAST 235
+#define MOTOR_SLOW 210
 
-#define D_A 5			// 좌우측 감지 후진
-#define D_B 8			// 정면 후진
-#define D_C 15			// 방향전환
-#define D_LONG 60		// 한쪽 거리가 멀면
-#define MOTOR_FAST 210
-#define MOTOR_SLOW 150
+#define TURN_TIME 30000
+#define MID_ANGLE 4000
 
-int mode_arr[] = { 0, 1, 0, 1, 0, 2, 0, 2, 0, 2, 3, 4 };
-int mode_index;
-int mode;        // front(0), left(1), right(2), 주차 준비(3), 주차 진행(4)
-int mode_change;    // don't change(0), change(1)
-unsigned char i, j;
+#define ARR_SIZE 5
+# define SWAP(x, y, temp) ( (temp)=(x), (x)=(y), (y)=(temp) )
+
+unsigned long int TCsec;
+unsigned long int TCstart;
+
+unsigned char mode;
 
 /* 서보 */
 void Init_Timer3A()
@@ -24,8 +27,8 @@ void Init_Timer3A()
 	TCCR3A = 0xAA; // FAST PWM
 	TCCR3B = 0x1A; // 8분주=0.5usec
 
-	OCR3AH = 3000 >> 8;          // 1500usec=0도
-	OCR3AL = 3000 & 0xff;
+	OCR3AH = MID_ANGLE >> 8;          // 1500usec=0도
+	OCR3AL = MID_ANGLE & 0xff;
 	DDRE = 0x08;               // DDRE=0x08;   // PE 3 out  
 	ICR3H = 39999 >> 8;
 	ICR3L = 39999 & 0xff;        // 0.5usec*40000=20000usec=50Hz
@@ -33,8 +36,8 @@ void Init_Timer3A()
 
 void Servo_motor(int angle)
 {
-	OCR3AH = (angle * 14 + 3640) >> 8;
-	OCR3AL = (angle * 14 + 3640) & 0xFF;
+	OCR3AH = (angle * 14 + MID_ANGLE) >> 8;
+	OCR3AL = (angle * 14 + MID_ANGLE) & 0xFF;
 }
 
 /* 초음파 센서 */
@@ -46,39 +49,46 @@ void Servo_motor(int angle)
 #define Echo2        PIND.1
 #define Echo3        PIND.2
 
-unsigned int rightD;        // 오른쪽 
-unsigned int frontD;        // 정면
-unsigned int frontPastD;
-unsigned int leftD;            // 왼쪽
+unsigned int leftArr[ARR_SIZE];         // 왼쪽
+unsigned int rightArr[ARR_SIZE];        // 정면
+unsigned int frontArr[ARR_SIZE];        // 오른쪽
+unsigned int leftD;         // 왼쪽
+unsigned int rightD;        // 정면
+unsigned int frontD;        // 오른쪽 
+unsigned int leftPastD;         // 왼쪽
+unsigned int frontPastD;        // 정면
+unsigned int rightPastD;        // 오른쪽
 
-unsigned int temp;
+unsigned char L_R;
+
 // unsigned int sonar_arr[3];
 
 unsigned char rangeStr[5];
+unsigned char TCsecStr[10];
 
-void getEchoFront() {
+void getEchoFront(unsigned char i) {
 	while (!Echo1);//high가 될때
 	TCNT1 = 0; TCCR1B = 2; //카운터시작 , 0.5분주
 	while (Echo1);//low가 될때
 	TCCR1B = 8; //카운터 정지 TCCR1B = 0도 가능
-	frontD = TCNT1 / 116;//CM변경
+	rightArr[i] = TCNT1 / 116;//CM변경
 	TCNT1 = 0;
 }
-void getEchoRight()
+void getEchoRight(unsigned char i)
 {
 	while (!Echo2);//high가 될때
 	TCNT1 = 0; TCCR1B = 2; //카운터시작 , 0.5분주
 	while (Echo2);//low가 될때
 	TCCR1B = 8; //카운터 정지 TCCR1B = 0도 가능
-	rightD = TCNT1 / 116;//CM변경  
+	frontArr[i] = TCNT1 / 116;//CM변경  
 	TCNT1 = 0;
 }
-void getEchoLeft() {
+void getEchoLeft(unsigned char i) {
 	while (!Echo3);//high가 될때
 	TCNT1 = 0; TCCR1B = 2; //카운터시작 , 0.5분주
 	while (Echo3);//low가 될때
 	TCCR1B = 8; //카운터 정지 TCCR1B = 0도 가능
-	leftD = TCNT1 / 116;//CM변경      
+	leftArr[i] = TCNT1 / 116;//CM변경      
 	TCNT1 = 0;
 }
 /* 초음파 센서 */
@@ -107,6 +117,8 @@ interrupt[TIM0_COMP] void timer0_compare() {
 interrupt[TIM0_OVF] void timer0_overflow() {
 	PORTB.5 = 1;
 	PORTB.6 = 1;
+
+	TCsec++;
 }
 
 void Motor_fast() {
@@ -156,44 +168,175 @@ void DC_Right() {
 
 /* DC MOTOR */
 
-void get_sonar() {
-	Trigger1 = 1; delay_us(10); Trigger1 = 0; getEchoLeft(); delay_ms(10);
-	LCD_pos(0, 0);
-	sprintf(rangeStr, "%03d", leftD);
-	LCD_STR(rangeStr);
+int partition(unsigned int list[], int left, int right) {
+	int pivot, temp;
+	int low, high;
 
-	Trigger2 = 1; delay_us(10); Trigger2 = 0; getEchoFront(); delay_ms(10);
-	LCD_pos(0, 5);
+	low = left;
+	high = right + 1;
+	pivot = list[left];
+
+	do {
+		do {
+			low++;
+		} while (low <= right && list[low] < pivot);
+
+		do {
+			high--;
+		} while (high >= left && list[high] > pivot);
+
+		if (low < high) {
+			SWAP(list[low], list[high], temp);
+		}
+	} while (low < high);
+
+	SWAP(list[left], list[high], temp);
+
+	return high;
+}
+
+void quick_sort(unsigned int list[], int left, int right) {
+	if (left < right) {
+		int q = partition(list, left, right);
+
+		quick_sort(list, left, q - 1);
+		quick_sort(list, q + 1, right);
+	}
+}
+
+unsigned int get_median_L(unsigned char num) {
+	quick_sort(leftArr, 0, ARR_SIZE - 1);
+	return leftArr[num];
+}
+
+unsigned int get_median_F(unsigned char num) {
+	quick_sort(frontArr, 0, ARR_SIZE - 1);
+	return frontArr[num];
+}
+
+unsigned int get_median_R(unsigned char num) {
+	quick_sort(rightArr, 0, ARR_SIZE - 1);
+	return rightArr[num];
+}
+
+void get_sonar() {
+	unsigned char i = 0;
+	for (i = 0; i < ARR_SIZE; i++) {
+		Trigger3 = 1; delay_us(10); Trigger3 = 0; getEchoRight(i); delay_ms(10);
+		Trigger2 = 1; delay_us(10); Trigger2 = 0; getEchoFront(i); delay_ms(10);
+		Trigger1 = 1; delay_us(10); Trigger1 = 0; getEchoLeft(i); delay_ms(10);
+	}
+
+	leftD = get_median_L(2);
+	frontD = get_median_F(2);
+	rightD = get_median_R(1);
+
+	LCD_pos(0, 1);
 	sprintf(rangeStr, "%03d", rightD);
 	LCD_STR(rangeStr);
 
-	Trigger3 = 1; delay_us(10); Trigger3 = 0; getEchoRight(); delay_ms(10);
-	LCD_pos(0, 10);
+	LCD_pos(0, 5);
 	sprintf(rangeStr, "%03d", frontD);
 	LCD_STR(rangeStr);
+
+	LCD_pos(0, 9);
+	sprintf(rangeStr, "%03d", leftD);
+	LCD_STR(rangeStr);
+
+	LCD_pos(0, 14);
+	switch (mode)
+	{
+	case 0:
+		LCD_CHAR('A');
+		break;
+	case 1:
+		LCD_CHAR('B');
+		break;
+	case 2:
+		LCD_CHAR('C');
+		break;
+	case 3:
+		LCD_CHAR('D');
+		break;
+	case 4:
+		LCD_CHAR('E');
+		break;
+	default:
+		LCD_CHAR('Z');
+		break;
+	}
+
+	LCD_pos(1, 0);
+	sprintf(TCsecStr, "%4x%4x", TCsec >> 16, TCsec);
+	LCD_STR(TCsecStr);
+}
+
+void normal_mode() {
+	switch (L_R) {
+	case 0:
+		if (rightD > D_C && rightPastD > D_C && frontD < D_C && frontPastD < D_C) { mode = 1; DC_front(); Motor_fast(); Servo_motor(0); delay_ms(100); }
+		else if (leftD < D_A) { DC_back(); Motor_fast(); Servo_motor(-45); delay_ms(200); Servo_motor(0); delay_ms(200); }
+		else if (leftD < D_B) { DC_front(); Motor_fast(); Servo_motor(5 * (D_B - leftD)); }
+		break;
+
+	case 1:
+		if (leftD > D_C && leftPastD > D_C && frontD < D_C && frontPastD < D_C) { mode = 1; DC_front(); Motor_fast(); Servo_motor(0); delay_ms(100); }
+		else if (rightD < D_A) { DC_back(); Motor_fast(); Servo_motor(45); delay_ms(200); Servo_motor(0); delay_ms(200); }
+		else if (rightD < D_B) { DC_front(); Motor_fast(); Servo_motor(-5 * (D_B - rightD)); }
+		break;
+
+	default:
+		DC_front(); Motor_slow(); Servo_motor(0);
+	}
+}
+
+void turn_mode() {
+	switch (L_R) {
+	case 0:
+		DC_Right(); Motor_fast(); Servo_motor(45);
+		break;
+	case 1:
+		DC_Left(); Motor_fast(); Servo_motor(-45);
+		break;
+	default:
+		DC_back(); Motor_slow(); Servo_motor(0);
+	}
+	//switch (L_R) {
+	//case 0:
+	//	if (frontD < frontPastD) { mode = 0; }
+	//	else { DC_Right(); Motor_fast(); Servo_motor(45); }
+	//	break;
+	//case 1:
+	//	if (frontD < frontPastD) { mode = 0; }
+	//	else { DC_Left(); Motor_fast(); Servo_motor(-45); }
+	//	break;
+	//default:
+	//	DC_back(); Motor_slow(); Servo_motor(0);
+	//}
 }
 
 void main() {
 	SREG |= 0x80;
-
 	custom_port_init();
-
 	Init_Timer3A();
 	Port_Init();
 	LCD_Init();
-
 	TIMSK_setting();
 	timer0_Init();
 
 	TCCR1A = 0;
 	TCCR1B = 8;
-
 	Motor_fast();
 
-	frontD = 0;
-	frontPastD = 0;
-	rightD = 0;
 	leftD = 0;
+	frontD = 0;
+	rightD = 0;
+	leftPastD = 0;
+	frontPastD = 0;
+	rightPastD = 0;
+
+	TCsec = 0;
+	TCstart = 0;
 
 	PORTE.3 = 0;
 
@@ -206,69 +349,60 @@ void main() {
 	DC_front();
 	/* DC Default */
 
-	mode_index = 0;
+	L_R = 2;    //작은 값 L(0), R(1)
 	mode = 0;
-	mode_change = 0;
-	temp = 0;
-	i = 0x00;
-	j = 0x00;
 
 	while (1) {
+		L_R = 0;
+		leftPastD = leftD;
 		frontPastD = frontD;
-		if (mode_change) { mode_change = 0; mode_index++; mode = mode_arr[mode_index]; DC_start(); }
+		rightPastD = rightD;
+
 		get_sonar();
+		if (leftD > rightD) L_R = 1;
 
-		switch (mode) {
-		case 0:        // front
-			if (frontD < D_A) {
-				Servo_motor(0);
-				Motor_slow();
+		if (!mode) TCstart = 0;
+		else if (TCstart == 0) TCstart = TCsec;
+
+		if (leftD > leftPastD - DELTA && leftD < leftPastD + DELTA && frontD > frontPastD - DELTA && frontD < frontPastD + DELTA && rightD > rightPastD - DELTA && rightD < rightPastD + DELTA) {
+			switch (mode) {
+			case 0:
 				DC_back();
+				Motor_slow();
 
-				mode_change = 1;
-				delay_ms(1000);
-				DC_stop();
+				if (leftPastD > rightPastD) {
+					Servo_motor(30);
+					delay_ms(400);
+					Servo_motor(-20);
+				}
+				else {
+					Servo_motor(-30);
+					delay_ms(400);
+					Servo_motor(20);
+				}
+				delay_ms(500);
+				break;
+			case 1:
+				if ((TCsec - TCstart) / 30000) { mode = 0; DC_front(); Motor_fast(); Servo_motor(0); delay_ms(100); }
+				break;
+			case 2:
+				break;
+			default:
 			}
-			else if (rightD > leftD) {
-				if (rightD < D_A) { Servo_motor(-15); Motor_slow(); DC_front(); }
-				else if (rightD < D_B) { Servo_motor(-5); Motor_fast(); DC_front(); }
-				else { Servo_motor(0); Motor_fast(); DC_front(); }
-			}
-			else {
-				if (leftD < D_A) { Servo_motor(15); Motor_slow(); DC_front(); }
-				else if (leftD < D_B) { Servo_motor(5); Motor_fast(); DC_front(); }
-				else { Servo_motor(0); Motor_fast(); DC_front(); }
-			}
-			break;
-		case 1:        // left
-			if (frontPastD > frontD) { DC_stop(); Servo_motor(0); Motor_slow(); mode_change = 1; delay_ms(100); }
-			Servo_motor(-40);
-			DC_Left();
-			break;
-		case 2:        // right
-			if (frontPastD > frontD) { DC_stop(); Servo_motor(0); Motor_slow(); mode_change = 1; delay_ms(100); }
-			Servo_motor(40);
-			DC_Right();
-			break;
-		case 3:        // 주차 준비
-			if (rightD > leftD) {
-				if (leftD < D_A) { Servo_motor(15); Motor_slow(); DC_front(); }
-				else if (leftD < D_B) { Servo_motor(5); Motor_fast(); DC_front(); }
-				else { Servo_motor(0); Motor_fast(); DC_front(); }
-			}
-			else {
-				if (rightD < D_A) { Servo_motor(-15); Motor_slow(); DC_front(); }
-				else if (rightD < D_B) { Servo_motor(-5); Motor_fast(); DC_front(); }
-				else { Servo_motor(0); Motor_fast(); DC_front(); }
-
-			}
-			break;
-
-		default:
-			mode_change = 0;
-			mode = 0;
 		}
-
-		delay_ms(1000);
+		else {
+			switch (mode) {
+			case 0:
+				normal_mode();
+				break;
+			case 1:
+				turn_mode();
+				break;
+			case 2:
+				break;
+			default:
+			}
+		}
+		delay_ms(100);
 	}
 }
