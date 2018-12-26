@@ -1,0 +1,66 @@
+RAM Allocation [bytes]
+Variable                                                                          Address   Size
+------------------------------------------------------------------------------------------------
+TCsec                                                                             0x0500       4
+TCstart                                                                           0x0504       4
+leftArr                                                                           0x0508      10
+rightArr                                                                          0x0512      10
+frontArr                                                                          0x051C      10
+frontPastD                                                                        0x0526       2
+rightPastD                                                                        0x0528       2
+L_R                                                                               0x052A       1
+rangeStr                                                                          0x052B       5
+TCsecStr                                                                          0x0530      10
+
+EEPROM Allocation [bytes]
+Variable                                                                          Address   Size
+------------------------------------------------------------------------------------------------
+
+Register Allocation
+Variable                                                                          Register  Size
+------------------------------------------------------------------------------------------------
+mode                                                                              R5           1
+nowStat                                                                           R4           1
+leftD                                                                             R6,R7        2
+rightD                                                                            R8,R9        2
+frontD                                                                            R10,R11      2
+leftPastD                                                                         R12,R13      2
+
+FLASH Allocation [words]
+Function                                                                          Address   Size
+------------------------------------------------------------------------------------------------
+Port_Init                                                                         0x00078      9
+LCD_Data                                                                          0x00081      7
+LCD_Comm                                                                          0x00088      7
+LCD_CHAR                                                                          0x0008F      7
+LCD_STR                                                                           0x00096     13
+LCD_pos                                                                           0x000A3     15
+LCD_Clear                                                                         0x000B2      3
+LCD_Init                                                                          0x000B5     12
+Init_Timer3A                                                                      0x000C1     21
+Servo_motor                                                                       0x000D6     21
+getEchoFront                                                                      0x000EB     14
+getEchoRight                                                                      0x000F9     14
+getEchoLeft                                                                       0x00107     14
+custom_port_init                                                                  0x00115      6
+TIMSK_setting                                                                     0x0011B      2
+timer0_Init                                                                       0x0011D      3
+timer0_compare                                                                    0x00120      3
+timer0_overflow                                                                   0x00123     27
+Motor_fast                                                                        0x0013E      2
+Motor_slow                                                                        0x00140      3
+DC_front                                                                          0x00143      5
+DC_back                                                                           0x00148      5
+DC_stop                                                                           0x0014D      5
+partition                                                                         0x00152     77
+quick_sort                                                                        0x0019F     33
+get_median_L                                                                      0x001C0      8
+get_median_F                                                                      0x001C8      8
+get_median_R                                                                      0x001D0      8
+get_sonar                                                                         0x001D8    101
+main                                                                              0x0023D    352
+put_buff_G100                                                                     0x0039D     43
+_print_G100                                                                       0x003C8    294
+sprintf                                                                           0x004EE     49
+strlen                                                                            0x0051F     12
+strlenf                                                                           0x0052B     13
